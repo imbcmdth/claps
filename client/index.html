@@ -1,0 +1,100 @@
+<html>
+<head>
+  <script src="sample-player.min.js"></script>
+<body>
+  <button id="clapper">Clap!</button>
+<script>
+const clapButt = document.querySelector('#clapper');
+let audioContext;
+let samples;
+let sampleNames;
+const clapCounts = {
+  bathroom: 10,
+  corridor: 10,
+  hall: 11,
+  room: 30,
+  toilet: 16,
+};
+const useClapTypes = [
+  'bathroom',
+  'corridor',
+  'hall',
+  'room',
+  'toilet',
+];
+const clapData = {};
+
+const pad = (str) => ('0' + str).slice(-2);
+const fetchAllClapData = async () => {
+  const topLevelPromises = [];
+  useClapTypes.forEach((clapType) => {
+    const clapCount = clapCounts[clapType];
+    const clapFetchers = [];
+    for (let i = 1; i <= clapCount; i++) {
+      clapFetchers.push(fetch(`Claps/clap-${clapType}-${pad(i)}.wav`));
+    }
+    clapData[clapType] = [];
+    const allOfTypeFetched = Promise.all(clapFetchers)
+      .then(async (clapResponses) => {
+        return Promise.all(clapResponses.map(async (e) => await e.arrayBuffer()));
+      }).then((clapBuffers) => {
+        clapData[clapType] = clapBuffers;
+      });
+    topLevelPromises.push(allOfTypeFetched);
+  });
+  return Promise.all(topLevelPromises);
+};
+
+const makeSamples = (audioCtx) => {
+  const types = Object.keys(clapData);
+  const samples = {};
+  const samplePromises = [];
+  types.forEach((clapType) => {
+    for (let i = 0; i < clapData[clapType].length; i++) {
+      const decodePromise = audioCtx.decodeAudioData(clapData[clapType][i]).then((sample) => samples[`${clapType}-${i}`] = sample);
+      samplePromises.push(decodePromise);
+    }
+  });
+  return Promise.all(samplePromises).then(() => samples);
+};
+
+const clapFetchPromise = fetchAllClapData();
+
+const dist = (center, width) => {
+  let a, b;
+  do {
+    a = (Math.random() * 2) - 1;
+    b = (Math.random() * 2) - 1;
+  } while (Math.sqrt(a*a+b*b) > 1);
+  return center + (a * width);
+};
+
+const everyOtherClick = () => {
+  const sampleArray = [];
+  for (let i = 0; i < 500; i++) {
+    let triggered = sampleNames[Math.floor(Math.random() * sampleNames.length)];
+    let time = dist(2, 2);
+    sampleArray.push({ note: triggered, time, gain: 1 - Math.abs((time - 2) / 2) });
+  }
+  samples.schedule(audioContext.currentTime, sampleArray);
+};
+
+const firstClick = async () => {
+  audioContext = new AudioContext();
+
+  await clapFetchPromise;
+  const sampleData = await makeSamples(audioContext);
+  sampleNames = Object.keys(sampleData);
+  samples = SamplePlayer(audioContext, sampleData);
+  samples.connect(audioContext.destination);
+
+  // Switch Events
+  clapButt.removeEventListener('click', firstClick);
+  clapButt.addEventListener('click', everyOtherClick);
+
+  // Finally, trigger a set of clicks
+  everyOtherClick();
+};
+
+clapButt.addEventListener('click', firstClick);
+</script>
