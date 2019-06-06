@@ -1,14 +1,30 @@
 <html>
 <head>
+  <link href="https://vjs.zencdn.net/7.5.4/video-js.css" rel="stylesheet">
   <script src="sample-player.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pizzicato/0.6.4/Pizzicato.min.js"></script>
+  <style>
+    .video-js button.clap-icon {
+      background-image: url('clapping-hands-sign_1f44f.png');
+      background-size: contain;
+      background-repeat:  no-repeat;
+    }
+  </style>
 <body>
+  <video id='my-video' class='video-js' controls preload='auto' width='640' height='264'>
+    <source src="https://vjs.zencdn.net/v/oceans.mp4" type="video/mp4"></source>
+  </video>
   <button id="clapper">Clap!</button>
+
+  <script src='https://vjs.zencdn.net/7.5.4/video.js'></script>
 <script>
 const clapButt = document.querySelector('#clapper');
+let player;
 let audioContext;
 let samples;
 let sampleNames;
+let lastClapRequest;
+
 const clapCounts = {
   bathroom: 10,
   corridor: 10,
@@ -84,10 +100,13 @@ const dist = (center, width) => {
   } while (Math.sqrt(a*a+b*b) > 1);
   return center + (a * width);
 };
-
-const everyOtherClick = () => {
+const clamp = (n, a, b) => Math.max(a, Math.min(n, b));
+const onClapResponse = (count) => {
+  if (count <= 0) {
+    return;
+  }
   const sampleArray = [];
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < clamp(count, 1, 500); i++) {
     let triggered = sampleNames[Math.floor(Math.random() * sampleNames.length)];
     let time = dist(2, 2);
     samples.start(triggered, audioContext.currentTime + time, { gain:  1 - Math.abs((time - 2) / 2), asdr: envelopes[i % envelopes.length]});
@@ -97,7 +116,7 @@ const everyOtherClick = () => {
   //samples.schedule(audioContext.currentTime, sampleArray);
 };
 
-const firstClick = async () => {
+const initClapEngine = async () => {
   var reverb = new Pizzicato.Effects.Reverb({
       time: 0.4,
       decay: 0.5,
@@ -112,14 +131,42 @@ const firstClick = async () => {
   samples = SamplePlayer(audioContext, sampleData);
   samples.connect(reverb);
   reverb.connect(audioContext.destination);
-
-  // Switch Events
-  clapButt.removeEventListener('click', firstClick);
-  clapButt.addEventListener('click', everyOtherClick);
-
-  // Finally, trigger a set of clicks
-  everyOtherClick();
+  setInterval(clickCheckLoop, 1000);
 };
 
-clapButt.addEventListener('click', firstClick);
+const clickCheckLoop = async () => {
+  let response;
+  if (lastClapRequest) {
+    response = await fetch('/clap-off/' + lastClapRequest);
+  } else {
+    response = await fetch('/clap-off');
+  }
+  const obj = await response.json();
+  lastClapRequest = obj.requestedAt;
+  onClapResponse(obj.numberOfClaps);
+};
+
+function newButtonToggle () {
+  const BaseButton = videojs.getComponent('Button');
+  const ClapButton = videojs.extend(BaseButton, {
+    constructor: function() {
+      BaseButton.apply(this, arguments);
+      this.addClass('clap-icon');
+      /* initialize your button */
+    },
+    handleClick: function() {
+      fetch('/clap-on', {method: 'POST'});
+    }
+  });
+  videojs.registerComponent('ClapButton', ClapButton);
+  player = videojs('my-video');
+  player.getChild('controlBar').addChild('clapButton', {
+    text: 'Applause'
+  });
+
+  player.on('play', initClapEngine);
+}
+
+newButtonToggle();
+
 </script>
